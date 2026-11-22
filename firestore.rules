@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function signed() { return request.auth != null; }
+  function session(s) { return get(/databases/$(database)/documents/sessions/$(s)); }
+  function owner(s) { return signed() && session(s).data.owner == request.auth.uid; }
+  match /sessions/{s} {
+   // Anyone signed in can retrieve a session when they know its random code.
+   allow get: if signed();
+   allow list: if false;
+   allow create: if signed() && request.resource.data.owner == request.auth.uid && request.resource.data.active == true && request.resource.data.keys().hasOnly(['owner','teacher','subject','topic','active','task','createdAt']);
+   allow update: if signed() && resource.data.owner == request.auth.uid && request.resource.data.owner == resource.data.owner;
+   allow delete: if false;
+   match /students/{studentId} {
+    allow get, list: if owner(s);
+    allow create, update: if signed() && studentId == request.auth.uid && session(s).data.active == true && request.resource.data.keys().hasOnly(['name','joinedAt']);
+    allow delete: if false;
+   }
+   match /answers/{answerId} {
+    // Talaba o'z javob hujjatini (hali yaratilmagan bo'lsa ham) o'qiy oladi; ro'yxatni faqat o'qituvchi oladi.
+    allow get: if owner(s) || (signed() && answerId.matches('.*_' + request.auth.uid));
+    allow list: if owner(s);
+    allow create: if signed() && session(s).data.active == true && request.resource.data.studentId == request.auth.uid && answerId == request.resource.data.taskId + '_' + request.auth.uid && request.resource.data.keys().hasOnly(['studentId','taskId','question','answer','correct','submittedAt']) && request.resource.data.taskId == session(s).data.task.id && request.resource.data.question == session(s).data.task.question && !exists(/databases/$(database)/documents/sessions/$(s)/answers/$(answerId));
+    allow update, delete: if false;
+   }
+  }
+ }
+}
